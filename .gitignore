@@ -22,6 +22,9 @@ htmlcov/
 .pytest_cache/
 .tox/
 
+# Docs
+docs/_build/
+
 # Type / lint caches
 .ruff_cache/
 .mypy_cache/
