@@ -35,6 +35,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Code Generators",
   "Topic :: Software Development :: Quality Assurance",
   "Topic :: Utilities"
@@ -175,28 +176,13 @@ ban-relative-imports = "all"
   "S101", # pytest tests use assert
   "SLF001"
 ]
-"tools/*.py" = [
-  "ANN", # release scripts are short procedural shell-style code
-  "D", # release scripts are not part of the public docs surface
-  "DTZ", # naive dates are intentional (changelog dates)
-  "EM", # release scripts speak directly to stderr
-  "INP", # tools/ is a script folder, not a package
-  "PLR", # release scripts have simple linear flow
-  "PLW1514", # default encoding is fine for release scripts
-  "PTH", # plain open() is fine for release scripts
-  "RET503", # implicit None return is fine for release scripts
-  "RUF", # release scripts intentionally use simple constructs
-  "S", # subprocess/asserts are fine in maintenance scripts
-  "T20", # print is the script's primary output channel
-  "TRY" # release scripts use simple error reporting
-]
 
 [tool.tomlsort]
 sort_inline_tables = true
 sort_table_keys = true
 
 [tool.tox]
-envlist = ["py310", "py311", "py312", "py313", "pre-commit", "type"]
+envlist = ["py310", "py311", "py312", "py313", "py314", "pre-commit", "type"]
 minversion = "4.22"
 
 [tool.tox.env.pre-commit]
