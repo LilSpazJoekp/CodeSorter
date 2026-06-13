@@ -1,0 +1,36 @@
+# Byte-compiled / cached
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Type / lint caches
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Project-local runtime artifacts
+sorted.json

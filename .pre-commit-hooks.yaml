@@ -1,0 +1,15 @@
+- id: codesorter
+  name: codesorter
+  description: Sort Python code with codesorter.
+  entry: codesorter
+  language: python
+  types: [python]
+  require_serial: true
+
+- id: codesorter-check
+  name: codesorter (check)
+  description: Check that Python code is sorted by codesorter.
+  entry: codesorter --check
+  language: python
+  types: [python]
+  require_serial: true
