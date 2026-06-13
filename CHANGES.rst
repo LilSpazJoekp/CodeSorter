@@ -2,6 +2,8 @@
  Change Log
 ############
 
+codesorter follows `semantic versioning <https://semver.org/>`_.
+
 ************
  Unreleased
 ************
