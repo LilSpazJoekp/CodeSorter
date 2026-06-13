@@ -23,7 +23,6 @@ intersphinx_mapping = {
 # libcst does not publish an intersphinx inventory, so its types cannot be resolved.
 nitpick_ignore = [
     ("py:class", "CodemodContext"),
-    ("py:class", "libcst.codemod.CodemodContext"),
 ]
 nitpicky = True
 project = "codesorter"
