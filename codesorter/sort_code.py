@@ -22,8 +22,7 @@ def _gen_unique_name(node: cst.ClassDef | cst.FunctionDef) -> str:
     else:
         items = (node,)
     for item in items:
-        for name in m.findall(item, m.Name()):
-            parts.append(cst.ensure_type(name, cst.Name).value)
+        parts.extend(cst.ensure_type(name, cst.Name).value for name in m.findall(item, m.Name()))
     return ".".join(parts)
 
 
@@ -119,7 +118,7 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         self.dependencies: defaultdict[str, set[str]] = defaultdict(set)
         self.dependents: defaultdict[str, set[str]] = defaultdict(set)
 
-    def _get_dependencies(
+    def _get_dependencies(  # noqa: C901
         self,
         node: cst.ClassDef | cst.FunctionDef,
     ) -> tuple[list[str], md.Scope]:
@@ -149,7 +148,7 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                 try:
                     node_name = cst.ensure_type(found["name"], cst.Name).value
                     is_import = isinstance(
-                        list(meta.assignments[node_name])[0],  # noqa: RUF015
+                        next(iter(meta.assignments[node_name])),
                         md.ImportAssignment,
                     )
                     if is_import:
@@ -168,7 +167,7 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                             break
                     if is_global_scope:
                         dependencies.add(node_name)
-                except IndexError:
+                except StopIteration:
                     pass
             if self.matches(node, m.ClassDef()):
                 for subclass in self.extractall(

@@ -16,7 +16,8 @@ docs = [
   "sphinx-autodoc-typehints>=2.5.0"
 ]
 lint = [
-  "pre-commit>=4.6.0"
+  "pre-commit>=4.6.0",
+  "ruff>=0.15.17"
 ]
 test = [
   "coverage>=7.14.1",
@@ -44,7 +45,8 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Code Generators",
   "Topic :: Software Development :: Quality Assurance",
-  "Topic :: Utilities"
+  "Topic :: Utilities",
+  "Typing :: Typed"
 ]
 dependencies = [
   "click>=8.4.1,<9",
@@ -67,6 +69,7 @@ requires-python = ">=3.10"
 codesorter = "codesorter:main"
 
 [project.urls]
+"Change Log" = "https://codesorter.readthedocs.io/en/latest/package_info/change_log.html"
 "Documentation" = "https://codesorter.readthedocs.io/"
 "Issue Tracker" = "https://github.com/praw-dev/CodeSorter/issues"
 "Source Code" = "https://github.com/praw-dev/CodeSorter"
@@ -99,67 +102,29 @@ preview = true
 
 [tool.ruff.lint]
 ignore = [
+  "COM812", # trailing comma missing (conflicts with the formatter)
+  "CPY001", # missing copyright notice
+  "D203", # incorrect-blank-line-before-class (conflicts with D211)
+  "D213", # multi-line-summary-second-line (conflicts with D212)
+  "DOC201", # `return` not documented in docstring
+  "E501", # line too long (handled by the formatter)
+  "ISC001" # single-line implicit string concatenation (conflicts with the formatter)
 ]
-select = [
-  "A", # flake8-builtins
-  "ANN", # flake8-annotations
-  "ARG", # flake8-unused-arguments
-  "B", # flake8-bugbear
-  "BLE", # flake8-blind-except
-  "C4", # flake8-comprehensions
-  "D", # pydocstyle
-  "DTZ", # flake8-datetimez
-  "E", # pycodestyle
-  "EM", # flake8-errmsg
-  "ERA", # eradicate
-  "EXE", # flake8-executable
-  "F", # pyflakes
-  "FA", # flake8-future-annotations
-  "FBT", # flake8-boolean-trap
-  "FIX", # flake8-fixme
-  "FLY", # flynt
-  "G", # flake8-logging-format
-  "I", # isort
-  "INP", # flake8-no-pep420
-  "ISC", # flake8-implicit-str-concat
-  "LOG", # flake8-logging
-  "N", # pep8-naming
-  "PGH", # pygrep-hooks
-  "PIE", # flake8-pie
-  "PL", # Pylint
-  "PT", # flake8-pytest-style
-  "PTH", # flake8-use-pathlib
-  "PYI", # flake8-pyi
-  "Q", # flake8-quotes
-  "RET", # flake8-return
-  "RSE", # flake8-raise
-  "RUF", # ruff-specific
-  "S", # bandit
-  "SIM", # flake8-simplify
-  "SLF", # flake8-self
-  "T10", # flake8-debugger
-  "T20", # flake8-print
-  "TCH", # flake8-type-checking
-  "TD", # flake8-todos
-  "TID", # flake8-tidy-imports
-  "TRY", # tryceratops
-  "UP", # pyupgrade
-  "W" # pycodestyle
-]
+select = ["ALL"]
 
 [tool.ruff.lint.flake8-annotations]
 allow-star-arg-any = true
 suppress-dummy-args = true
 
+[tool.ruff.lint.flake8-builtins]
+builtins-ignorelist = ["id"]
+
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
 "codesorter/cli.py" = [
-  "FBT001", # click commands receive boolean flags as positional kwargs
-  "PLR0913", # click commands naturally take many parameters
-  "PLR0917" # click commands naturally take many parameters
+  "PLR0913" # the click command naturally takes one parameter per option
 ]
 "codesorter/sort_code.py" = [
   "ARG002", # libcst visitor methods must accept original_node/updated_node
@@ -177,18 +142,12 @@ ban-relative-imports = "all"
 "tests/*.py" = [
   "ANN001", # pytest fixture params don't need annotations
   "ANN201", # test functions don't need return annotations
-  "ANN202", # test helpers don't need return annotations
   "ARG002", # pytest passes fixtures (e.g. capsys) that may be unused
-  "D100", # test modules don't need module docstrings
-  "D101", # test classes don't need docstrings
-  "D102", # test methods don't need docstrings
   "D103", # test functions don't need docstrings
-  "D107", # test __init__ don't need docstrings
-  "PLC0415", # tests intentionally import CLI lazily inside functions
+  "PLC0415", # tests import the CLI lazily inside functions
   "PLC1901", # comparison-to-empty-string idiom is fine in tests
   "PLR6301", # pytest test methods on a class cannot be static
-  "S101", # pytest tests use assert
-  "SLF001"
+  "S101" # pytest tests use assert
 ]
 
 [tool.tomlsort]
@@ -196,7 +155,7 @@ sort_inline_tables = true
 sort_table_keys = true
 
 [tool.tox]
-envlist = ["py310", "py311", "py312", "py313", "py314", "pre-commit", "type"]
+envlist = ["py310", "py311", "py312", "py313", "py314", "docs", "pre-commit", "type"]
 minversion = "4.22"
 
 [tool.tox.env.docs]
@@ -221,8 +180,8 @@ runner = "uv-venv-lock-runner"
 commands = [["pre-commit", "run", "--all-files"]]
 dependency_groups = ["lint"]
 description = "run pre-commit on code base"
+pass_env = ["SKIP"]
 runner = "uv-venv-lock-runner"
-set_env.SKIP = "no-commit-to-branch"
 
 [tool.tox.env.type]
 commands = [["pyright"]]

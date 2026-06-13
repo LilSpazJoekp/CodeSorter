@@ -171,6 +171,7 @@ def _matches_gitignore(
     nargs=-1,
 )
 def main(
+    *,
     check: bool,
     jobs: int | None,
     show_successes: bool,

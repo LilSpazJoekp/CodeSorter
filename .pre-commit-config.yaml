@@ -46,6 +46,8 @@ repos:
         files: ^tests/(integration|unit)/.*\.py$
         id: name-tests-test
       - id: no-commit-to-branch
+      - files: ^(\.github/workflows/.*\.ya?ml|\.readthedocs.ya?ml)$
+        id: sort-simple-yaml
       - id: trailing-whitespace
     repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
