@@ -8,6 +8,10 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+********************
+ 0.2.0 (2026/06/14)
+********************
+
 **Added**
 
 - Sort module- and class-level assignments. Within every scope the order is now
