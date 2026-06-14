@@ -1,9 +1,9 @@
 import os
 
+API_ENDPOINTS = ["/api/users", "/api/posts", "/api/comments"]
+
 # Global variables that classes depend on
 DATABASE_CONFIG = {"database": "test_db", "host": "localhost", "port": 5432}
-
-API_ENDPOINTS = ["/api/users", "/api/posts", "/api/comments"]
 
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 

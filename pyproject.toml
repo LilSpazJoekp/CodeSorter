@@ -142,6 +142,7 @@ ban-relative-imports = "all"
   "D103", # test functions don't need docstrings
   "PLC0415", # tests import the CLI lazily inside functions
   "PLC1901", # comparison-to-empty-string idiom is fine in tests
+  "PLR0904", # a test class naturally accumulates many test methods
   "PLR6301", # pytest test methods on a class cannot be static
   "S101" # pytest tests use assert
 ]
