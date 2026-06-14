@@ -117,6 +117,21 @@ class MyClass:
         result = command.transform_module(cst.parse_module(code))
         assert result.code.strip() == ""
 
+    def test_method_body_dependency(self, test_files):
+        """Test that a class is sorted after a later class it depends on.
+
+        Regression test: a dependent must follow every class it depends on even when the
+        dependency is discovered through a method (here a return annotation), not a base
+        class. The previous heuristic could place the dependent before it.
+
+        """
+        input_code, expected_code = test_files
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(input_code))
+
+        assert expected_code == result.code
+
     def test_mixed_decorators(self, test_files):
         """Test sorting with mixed decorators."""
         input_code, expected_code = test_files

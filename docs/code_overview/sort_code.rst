@@ -16,5 +16,3 @@ class body.
 .. autoclass:: codesorter.sort_code.FixtureType
 
 .. autoclass:: codesorter.sort_code.PropertyType
-
-.. autoclass:: codesorter.sort_code.DependencyType
