@@ -8,6 +8,10 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+********************
+ 0.2.5 (2026/06/14)
+********************
+
 **Changed**
 
 - Depend on ``ruff`` directly so the formatter is always installed alongside
