@@ -47,6 +47,13 @@ def cache_result(func):
     return wrapper
 
 
+# Functions with decorators
+@cache_result
+def expensive_calculation(n):
+    """Perform an expensive calculation."""
+    return sum(i * i for i in range(n))
+
+
 def regular_function():
     """A regular function without decorators."""
     return "regular"
@@ -86,6 +93,12 @@ def validate_input(func):
         return func(*args, **kwargs)
 
     return wrapper
+
+
+@validate_input
+def process_data(data):
+    """Process input data."""
+    return [item.upper() for item in data]
 
 
 class APIClient:
@@ -136,19 +149,6 @@ class DatabaseManager:
     def is_debug_mode(self):
         """Check if debug mode is enabled."""
         return DEBUG_MODE
-
-
-# Functions with decorators
-@cache_result
-def expensive_calculation(n):
-    """Perform an expensive calculation."""
-    return sum(i * i for i in range(n))
-
-
-@validate_input
-def process_data(data):
-    """Process input data."""
-    return [item.upper() for item in data]
 
 
 class Mammal(Animal):

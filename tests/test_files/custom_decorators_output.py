@@ -16,6 +16,13 @@ def cache_result(func):
     return wrapper
 
 
+# Functions with custom decorators
+@cache_result
+def expensive_calculation(n):
+    """Perform an expensive calculation."""
+    return sum(i * i for i in range(n))
+
+
 def regular_function():
     """A regular function without decorators."""
     return "regular"
@@ -40,6 +47,16 @@ def retry_on_failure(max_attempts=3):
     return decorator
 
 
+@retry_on_failure(max_attempts=5)
+def unreliable_operation():
+    """An operation that might fail."""
+    import random
+
+    if random.random() < 0.7:
+        raise Exception("Random failure")
+    return "Success"
+
+
 def validate_input(func):
     """Validate input parameters."""
 
@@ -57,20 +74,3 @@ def validate_input(func):
 def process_data(data):
     """Process input data."""
     return [item.upper() for item in data]
-
-
-@retry_on_failure(max_attempts=5)
-def unreliable_operation():
-    """An operation that might fail."""
-    import random
-
-    if random.random() < 0.7:
-        raise Exception("Random failure")
-    return "Success"
-
-
-# Functions with custom decorators
-@cache_result
-def expensive_calculation(n):
-    """Perform an expensive calculation."""
-    return sum(i * i for i in range(n))

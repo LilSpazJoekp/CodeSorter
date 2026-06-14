@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import heapq
 from collections import defaultdict
 from enum import auto
 
@@ -24,13 +25,6 @@ def _gen_unique_name(node: cst.ClassDef | cst.FunctionDef) -> str:
     for item in items:
         parts.extend(cst.ensure_type(name, cst.Name).value for name in m.findall(item, m.Name()))
     return ".".join(parts)
-
-
-class DependencyType(enum.IntEnum):
-    """Ordering buckets used to keep dependents after their dependencies."""
-
-    not_required = auto()
-    required = auto()
 
 
 class FixtureType(enum.IntEnum):
@@ -118,6 +112,31 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         self.dependencies: defaultdict[str, set[str]] = defaultdict(set)
         self.dependents: defaultdict[str, set[str]] = defaultdict(set)
 
+    def _dependency_edges(
+        self,
+        items: list[cst.ClassDef | cst.FunctionDef],
+    ) -> tuple[list[set[int]], list[int]]:
+        """Build the in-group dependency edges as ``(dependents, indegree)`` by index.
+
+        ``dependents[i]`` holds the indexes that depend on ``items[i]`` and
+        ``indegree[i]`` counts the in-group dependencies of ``items[i]``. Only edges
+        between siblings in ``items`` are kept; references to names defined elsewhere
+        impose no ordering.
+
+        """
+        name_to_indexes: defaultdict[str, list[int]] = defaultdict(list)
+        for index, item in enumerate(items):
+            name_to_indexes[item.name.value].append(index)
+        dependents: list[set[int]] = [set() for _ in items]
+        indegree = [0] * len(items)
+        for index, item in enumerate(items):
+            for dependency in self.dependencies.get(item.name.value, ()):
+                for dependency_index in name_to_indexes.get(dependency, ()):
+                    if dependency_index != index and index not in dependents[dependency_index]:
+                        dependents[dependency_index].add(index)
+                        indegree[index] += 1
+        return dependents, indegree
+
     def _get_dependencies(  # noqa: C901
         self,
         node: cst.ClassDef | cst.FunctionDef,
@@ -196,15 +215,12 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         self,
         items: list[cst.ClassDef | cst.FunctionDef],
     ) -> dict[str, cst.ClassDef | cst.FunctionDef]:
-        return {
-            _gen_unique_name(old): new for old, new in zip(items, sorted(items, key=self._node_sort_key), strict=True)
-        }
+        return {_gen_unique_name(old): new for old, new in zip(items, self._sorted_items(items), strict=True)}
 
     def _node_sort_key(
         self,
         node: cst.ClassDef | cst.FunctionDef,
-    ) -> tuple[list[DependencyType], bool, MethodType, FixtureType, str, PropertyType]:
-        _, meta = self._get_dependencies(node)
+    ) -> tuple[bool, MethodType, FixtureType, str, PropertyType]:
         is_class = self.matches(node, m.ClassDef())
         method_type = MethodType.na
         fixture_type = FixtureType.na
@@ -270,14 +286,6 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                 elif isinstance(decorator, cst.Attribute) and isinstance(decorator.value, cst.Name):
                     method_type = MethodType.__members__.get(decorator.value.value, method_type)
         return (
-            [
-                DependencyType.required
-                if item.name in self.dependencies[node.name.value]
-                else DependencyType.not_required
-                for item in (
-                    meta.assignments if not is_class and isinstance(meta, md.ClassScope) else meta.globals.assignments
-                )
-            ],
             not is_class if self.in_class else is_class,
             method_type,
             fixture_type,
@@ -291,6 +299,40 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
             self.dependencies[node.name.value].add(dependency)
             for parent_dependency in self.dependencies[dependency]:
                 self.dependencies[node.name.value].add(parent_dependency)
+
+    def _sorted_items(
+        self,
+        items: list[cst.ClassDef | cst.FunctionDef],
+    ) -> list[cst.ClassDef | cst.FunctionDef]:
+        """Order siblings alphabetically while keeping each node after its dependencies.
+
+        A priority topological sort is used: among the nodes whose in-group dependencies
+        have all been emitted, the one with the smallest :meth:`._node_sort_key` is
+        chosen next. Any dependency cycle is broken by releasing the smallest-key node
+        still pending, so the function always returns every item exactly once.
+
+        """
+        keys = [self._node_sort_key(item) for item in items]
+        dependents, indegree = self._dependency_edges(items)
+        heap = [(keys[index], index) for index in range(len(items)) if indegree[index] == 0]
+        heapq.heapify(heap)
+        emitted = [False] * len(items)
+        order: list[cst.ClassDef | cst.FunctionDef] = []
+        while len(order) < len(items):
+            if not heap:
+                # A dependency cycle remains; release the smallest-key pending node.
+                stuck = min((index for index in range(len(items)) if not emitted[index]), key=keys.__getitem__)
+                heapq.heappush(heap, (keys[stuck], stuck))
+            _, index = heapq.heappop(heap)
+            if emitted[index]:
+                continue
+            emitted[index] = True
+            order.append(items[index])
+            for dependent in dependents[index]:
+                indegree[dependent] -= 1
+                if indegree[dependent] == 0 and not emitted[dependent]:
+                    heapq.heappush(heap, (keys[dependent], dependent))
+        return order
 
     def leave_ClassDef(
         self,
