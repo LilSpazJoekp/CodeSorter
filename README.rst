@@ -4,6 +4,15 @@
 
 CodeSorter is a LibCST codemod that automatically sorts and organizes Python code.
 
+.. warning::
+
+    Only apply CodeSorter to a code base you own or maintain. Reordering an entire file
+    is a sweeping, opinionated change that conflicts with in-flight work and erases the
+    history of carefully chosen ordering. Opening a pull request that runs CodeSorter
+    across **someone else's** project is strongly discouraged — it is noisy,
+    unsolicited, and burdensome to review. Adopt it as a pre-commit hook in your own
+    repositories instead, where every contributor benefits from the consistent ordering.
+
 **********
  Features
 **********
