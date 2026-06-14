@@ -3,11 +3,97 @@ from abc import ABC, abstractmethod
 from functools import wraps
 
 import pytest
+API_KEY = "test-key-123"
 
 # Global variables
 DATABASE_URL = "sqlite:///test.db"
-API_KEY = "test-key-123"
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+
+
+class APIClient:
+    """API client that uses global endpoints."""
+
+    def __init__(self):
+        self.base_url = "https://api.example.com"
+
+    def is_debug_mode(self):
+        """Check if debug mode is enabled."""
+        return DEBUG_MODE
+
+    def make_request(self, endpoint):
+        """Make a request to an endpoint."""
+        return f"GET {self.base_url}{endpoint}"
+
+
+# Base classes with inheritance
+class Animal(ABC):
+    """Base class for all animals."""
+
+    @abstractmethod
+    def make_sound(self):
+        """Make a sound."""
+
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+    def get_info(self):
+        """Get animal information."""
+        return f"{self.name} is {self.age} years old"
+
+
+# Classes with global dependencies
+class DatabaseManager:
+    """Manages database connections using global config."""
+
+    def __init__(self):
+        self.host = "localhost"  # Would normally use DATABASE_URL
+        self.port = 5432
+        self.database = "test_db"
+
+    def connect(self):
+        """Connect to database."""
+        return f"Connected to {self.host}:{self.port}/{self.database}"
+
+    def is_debug_mode(self):
+        """Check if debug mode is enabled."""
+        return DEBUG_MODE
+
+
+class Mammal(Animal):
+    """Base class for mammals."""
+
+    def __init__(self, name, age, fur_color):
+        super().__init__(name, age)
+        self.fur_color = fur_color
+
+    def get_fur_info(self):
+        """Get fur information."""
+        return f"Fur color: {self.fur_color}"
+
+    def make_sound(self):
+        """Make a mammal sound."""
+        return "Generic mammal sound"
+
+
+class Dog(Mammal):
+    """Dog class."""
+
+    def __init__(self, name, age, fur_color, breed):
+        super().__init__(name, age, fur_color)
+        self.breed = breed
+
+    def fetch(self):
+        """Fetch behavior."""
+        return f"{self.name} is fetching"
+
+    def get_breed_info(self):
+        """Get breed information."""
+        return f"Breed: {self.breed}"
+
+    def make_sound(self):
+        """Make a dog sound."""
+        return "Woof!"
 
 
 @pytest.fixture(autouse=True)
@@ -99,89 +185,3 @@ def validate_input(func):
 def process_data(data):
     """Process input data."""
     return [item.upper() for item in data]
-
-
-class APIClient:
-    """API client that uses global endpoints."""
-
-    def __init__(self):
-        self.base_url = "https://api.example.com"
-
-    def is_debug_mode(self):
-        """Check if debug mode is enabled."""
-        return DEBUG_MODE
-
-    def make_request(self, endpoint):
-        """Make a request to an endpoint."""
-        return f"GET {self.base_url}{endpoint}"
-
-
-# Base classes with inheritance
-class Animal(ABC):
-    """Base class for all animals."""
-
-    @abstractmethod
-    def make_sound(self):
-        """Make a sound."""
-
-    def __init__(self, name, age):
-        self.name = name
-        self.age = age
-
-    def get_info(self):
-        """Get animal information."""
-        return f"{self.name} is {self.age} years old"
-
-
-# Classes with global dependencies
-class DatabaseManager:
-    """Manages database connections using global config."""
-
-    def __init__(self):
-        self.host = "localhost"  # Would normally use DATABASE_URL
-        self.port = 5432
-        self.database = "test_db"
-
-    def connect(self):
-        """Connect to database."""
-        return f"Connected to {self.host}:{self.port}/{self.database}"
-
-    def is_debug_mode(self):
-        """Check if debug mode is enabled."""
-        return DEBUG_MODE
-
-
-class Mammal(Animal):
-    """Base class for mammals."""
-
-    def __init__(self, name, age, fur_color):
-        super().__init__(name, age)
-        self.fur_color = fur_color
-
-    def get_fur_info(self):
-        """Get fur information."""
-        return f"Fur color: {self.fur_color}"
-
-    def make_sound(self):
-        """Make a mammal sound."""
-        return "Generic mammal sound"
-
-
-class Dog(Mammal):
-    """Dog class."""
-
-    def __init__(self, name, age, fur_color, breed):
-        super().__init__(name, age, fur_color)
-        self.breed = breed
-
-    def fetch(self):
-        """Fetch behavior."""
-        return f"{self.name} is fetching"
-
-    def get_breed_info(self):
-        """Get breed information."""
-        return f"Breed: {self.breed}"
-
-    def make_sound(self):
-        """Make a dog sound."""
-        return "Woof!"

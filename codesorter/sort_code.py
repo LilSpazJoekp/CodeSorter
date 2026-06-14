@@ -6,47 +6,32 @@ import enum
 import heapq
 from collections import defaultdict
 from enum import auto
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar, cast
 
 import libcst as cst
 from libcst import matchers as m
 from libcst import metadata as md
 from libcst.codemod import CodemodContext, VisitorBasedCodemodCommand
 
+from codesorter.const import (
+    ORDER_SENSITIVE_BASES,
+    ORDER_SENSITIVE_DECORATORS,
+    PLAIN_DECORATOR_PARTS,
+    PROPERTY_DECORATOR_PARTS,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from typing_extensions import Self
 
-_PROPERTY_DECORATOR_PARTS = 2
-_PLAIN_DECORATOR_PARTS = 1
-
-
-def _gen_unique_name(node: cst.ClassDef | cst.FunctionDef) -> str:
-    parts = [node.name.value]
-    if isinstance(node, cst.ClassDef):
-        items: tuple[cst.CSTNode, ...] = (*node.bases, *node.decorators, *node.keywords)
-    else:
-        items = (node,)
-    for item in items:
-        parts.extend(cst.ensure_type(name, cst.Name).value for name in m.findall(item, m.Name()))
-    return ".".join(parts)
-
-
-def _name_sort_key(name: str) -> tuple[bool, str]:
-    """Return an alphabetical sort key that orders ``_``-prefixed names first.
-
-    A plain string sort places ``_`` (and dunders) after capitalized names because the
-    underscore has a higher code point than ``A``-``Z``. Sorting on a leading-underscore
-    flag first keeps private and dunder names grouped ahead of the public ones.
-
-    """
-    return (not name.startswith("_"), name)
-
-
 # The bound is a forward reference so this assignment does not depend on the source
 # position of ``_Commaed`` (which CodeSorter may reorder relative to this statement).
 _CommaT = TypeVar("_CommaT", bound="_Commaed")
+
+# A module- or class-body member that CodeSorter reorders: a class, a function, or a
+# constant (a simple-name assignment wrapped in a SimpleStatementLine).
+_Sortable: TypeAlias = "cst.ClassDef | cst.FunctionDef | cst.SimpleStatementLine"
 
 
 class _Commaed(Protocol):
@@ -205,34 +190,74 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
     # Add a description so that future codemodders can see what this does.
     DESCRIPTION: str = "Sorts code in project"
 
-    METADATA_DEPENDENCIES = (md.ScopeProvider,)
+    METADATA_DEPENDENCIES = (md.ScopeProvider, md.QualifiedNameProvider)
 
-    @property
-    def in_class(self) -> bool:
-        """Return True while the visitor is inside a class body."""
-        return bool(self._class_depth)
-
-    @in_class.setter
-    def in_class(self, value: bool) -> None:
-        if value:
-            self._class_depth += 1
-        elif self._class_depth > 0:
-            self._class_depth -= 1
-        else:
-            self._class_depth = 0
+    @staticmethod
+    def _is_sortable(member: cst.CSTNode, *, sort_constants: bool) -> bool:
+        """Return True if ``member`` is a class, function, or sortable constant."""
+        if isinstance(member, (cst.ClassDef, cst.FunctionDef)):
+            return True
+        return sort_constants and _constant_name(member) is not None
 
     def __init__(self, context: CodemodContext) -> None:
         """Initialize per-run state used while collecting and sorting nodes."""
         super().__init__(context)
-        self._counter = 0
-        self._class_depth = 0
         self.original_nodes: dict[str, cst.CSTNode] = {}
         self.dependencies: defaultdict[str, set[str]] = defaultdict(set)
-        self.dependents: defaultdict[str, set[str]] = defaultdict(set)
+        # When ``from __future__ import annotations`` is active every annotation is a
+        # lazy string, so a name used only in an annotation imposes no runtime ordering.
+        # ``_lazy_annotation_names`` holds the id of every such annotation Name node.
+        self._lazy_annotation_names: frozenset[int] = frozenset()
+
+    def _anchor_trailers(self, body: Sequence[cst.BaseStatement], *, sort_constants: bool) -> dict[int, int]:
+        """Map each augmented-assignment line to the index of the constant it augments.
+
+        An augmented assignment such as ``__all__ += other.__all__`` is anchored to the
+        most recent constant assignment to the same name so it travels with that
+        constant when the body is reordered, instead of being left behind as a fixed
+        barrier. The anchor only applies when every statement between the two is itself
+        movable, so a trailer is never lifted across an unrelated statement.
+
+        """
+        anchors: dict[int, int] = {}
+        if not sort_constants:
+            return anchors
+        constant_index: dict[str, int] = {}
+        for index, member in enumerate(body):
+            if (constant := _constant_name(member)) is not None:
+                constant_index[constant] = index
+                continue
+            name = _aug_assign_name(member)
+            if name is None or name not in constant_index:
+                continue
+            anchor = constant_index[name]
+            if all(
+                self._is_sortable(body[between], sort_constants=sort_constants) or between in anchors
+                for between in range(anchor + 1, index)
+            ):
+                anchors[index] = anchor
+        return anchors
+
+    def _candidate_names(self, expr: cst.BaseExpression) -> set[str]:
+        """Return identifying names for a base or decorator expression.
+
+        Includes the rightmost syntactic name and the last component of any resolved
+        qualified name, so import aliases (``from enum import IntEnum as IE``) resolve
+        back to the original name.
+
+        """
+        names: set[str] = set()
+        if (rightmost := _rightmost_name(expr)) is not None:
+            names.add(rightmost)
+        names.update(
+            qualified.name.rsplit(".", maxsplit=1)[-1]
+            for qualified in self.get_metadata(md.QualifiedNameProvider, expr, frozenset())
+        )
+        return names
 
     def _dependency_edges(
         self,
-        items: list[cst.ClassDef | cst.FunctionDef],
+        items: list[_Sortable],
     ) -> tuple[list[set[int]], list[int]]:
         """Build the in-group dependency edges as ``(dependents, indegree)`` by index.
 
@@ -244,11 +269,11 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         """
         name_to_indexes: defaultdict[str, list[int]] = defaultdict(list)
         for index, item in enumerate(items):
-            name_to_indexes[item.name.value].append(index)
+            name_to_indexes[_sortable_name(item)].append(index)
         dependents: list[set[int]] = [set() for _ in items]
         indegree = [0] * len(items)
         for index, item in enumerate(items):
-            for dependency in self.dependencies.get(item.name.value, ()):
+            for dependency in self.dependencies.get(_sortable_name(item), ()):
                 for dependency_index in name_to_indexes.get(dependency, ()):
                     if dependency_index != index and index not in dependents[dependency_index]:
                         dependents[dependency_index].add(index)
@@ -257,12 +282,13 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
 
     def _get_dependencies(  # noqa: C901
         self,
-        node: cst.ClassDef | cst.FunctionDef,
+        node: _Sortable,
     ) -> tuple[list[str], md.Scope]:
+        node_name = _sortable_name(node)
         original = self.original_nodes.get(_gen_unique_name(node))
         meta = None if original is None else self.get_metadata(md.ScopeProvider, original, None)
         if meta is None:
-            msg = f"missing scope metadata for {node.name.value!r}"
+            msg = f"missing scope metadata for {node_name!r}"
             raise ValueError(msg)
         dependencies: set[str] = set()
         if isinstance(meta, (md.ClassScope, md.GlobalScope)):
@@ -277,21 +303,27 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                 m.SaveMatchedNode(
                     m.Name(
                         metadata=m.MatchMetadataIfTrue(md.ScopeProvider, _outer_scope),
-                        value=m.DoesNotMatch(node.name.value),
+                        value=m.DoesNotMatch(node_name),
                     ),
                     "name",
                 ),
             ):
                 try:
-                    node_name = cst.ensure_type(found["name"], cst.Name).value
+                    # A name used only in a lazy annotation (under ``from __future__
+                    # import annotations``) is never evaluated at runtime, so it imposes
+                    # no ordering and is ignored. This also avoids a forward reference in
+                    # an annotation forging a false cycle with a real value-level edge.
+                    if id(found["name"]) in self._lazy_annotation_names:
+                        continue
+                    found_name = cst.ensure_type(found["name"], cst.Name).value
                     is_import = isinstance(
-                        next(iter(meta.assignments[node_name])),
+                        next(iter(meta.assignments[found_name])),
                         md.ImportAssignment,
                     )
                     if is_import:
                         continue
                     is_global_scope = False
-                    for access in meta[node_name]:
+                    for access in meta[found_name]:
                         if isinstance(access, md.Access) and access.is_annotation:
                             continue
                         if isinstance(access.scope, md.GlobalScope):
@@ -303,7 +335,7 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                             is_global_scope = True
                             break
                     if is_global_scope:
-                        dependencies.add(node_name)
+                        dependencies.add(found_name)
                 except StopIteration:
                     pass
             if self.matches(node, m.ClassDef()):
@@ -314,7 +346,7 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                             m.Arg(
                                 value=m.SaveMatchedNode(
                                     m.Name(
-                                        value=m.DoesNotMatch(node.name.value),
+                                        value=m.DoesNotMatch(node_name),
                                     ),
                                     "name",
                                 )
@@ -329,32 +361,55 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                         dependencies.add(subclass_name)
         return list(dependencies), meta
 
-    def _get_replacements(
-        self,
-        items: list[cst.ClassDef | cst.FunctionDef],
-    ) -> dict[str, cst.ClassDef | cst.FunctionDef]:
-        return {_gen_unique_name(old): new for old, new in zip(items, self._sorted_items(items), strict=True)}
+    def _is_order_sensitive_class(self, node: cst.ClassDef) -> bool:
+        """Return True if ``node`` is an enum, dataclass, or named tuple / typed dict.
 
-    def _node_sort_key(
+        The attribute order of these classes is significant (enum values, generated
+        ``__init__`` signatures), so their assignments are left in place. Names are
+        resolved through import aliases via :class:`QualifiedNameProvider`; custom enum
+        subclasses are still matched by an ``Enum``/``Flag`` name suffix.
+
+        """
+        for base in node.bases:
+            if any(
+                name in ORDER_SENSITIVE_BASES or name.endswith(("Enum", "Flag"))
+                for name in self._candidate_names(base.value)
+            ):
+                return True
+        for decorator in node.decorators:
+            target = decorator.decorator
+            target = target.func if isinstance(target, cst.Call) else target
+            if self._candidate_names(target) & ORDER_SENSITIVE_DECORATORS:
+                return True
+        return False
+
+    def _node_sort_key(  # noqa: C901
         self,
-        node: cst.ClassDef | cst.FunctionDef,
-    ) -> tuple[bool, MethodType, FixtureType, bool, str, PropertyType]:
+        node: _Sortable,
+    ) -> tuple[int, int, MethodType, FixtureType, bool, str, PropertyType]:
+        node_name = _sortable_name(node)
+        if not isinstance(node, (cst.ClassDef, cst.FunctionDef)):
+            # An assignment sorts ahead of classes and functions. Uppercase CONSTANTS sort
+            # before other variables, and within each group a leading underscore sorts
+            # first (so ``__dunder__`` and ``_private`` precede public names).
+            constant_rank = 0 if node_name.isupper() else 1
+            return (0, constant_rank, MethodType.na, FixtureType.na, *_name_sort_key(node_name), PropertyType.na)
         is_class = self.matches(node, m.ClassDef())
+        category = 1 if is_class else 2
         method_type = MethodType.na
         fixture_type = FixtureType.na
-        node_name = node.name.value
         property_type = PropertyType.na
         if not is_class:
             method_type = MethodType.instance
             for outer_decorator in node.decorators:
                 decorator = outer_decorator.decorator
                 decorator_parts = [cst.ensure_type(part, cst.Name).value for part in self.findall(decorator, m.Name())]
-                if len(decorator_parts) == _PROPERTY_DECORATOR_PARTS:
+                if len(decorator_parts) == PROPERTY_DECORATOR_PARTS:
                     decorator_type, accessor = decorator_parts
                     if decorator_type == node.name.value:
                         method_type = MethodType.property
                         property_type = PropertyType[accessor]
-                if len(decorator_parts) == _PLAIN_DECORATOR_PARTS:
+                if len(decorator_parts) == PLAIN_DECORATOR_PARTS:
                     decorator_type = decorator_parts[0]
                     if decorator_type == "property":
                         method_type = MethodType.property
@@ -404,24 +459,79 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                 elif isinstance(decorator, cst.Attribute) and isinstance(decorator.value, cst.Name):
                     method_type = MethodType.__members__.get(decorator.value.value, method_type)
         return (
-            not is_class if self.in_class else is_class,
+            category,
+            0,  # constant_rank is only meaningful for assignments
             method_type,
             fixture_type,
             *_name_sort_key(node_name),
             property_type,
         )
 
-    def _resolve_dependents(self, node: cst.ClassDef | cst.FunctionDef) -> None:
+    def _resolve_dependents(self, node: _Sortable) -> None:
         dependencies, _ = self._get_dependencies(node)
+        name = _sortable_name(node)
         for dependency in dependencies:
-            self.dependencies[node.name.value].add(dependency)
+            self.dependencies[name].add(dependency)
             for parent_dependency in self.dependencies[dependency]:
-                self.dependencies[node.name.value].add(parent_dependency)
+                self.dependencies[name].add(parent_dependency)
+
+    def _sorted_body(
+        self,
+        body: Sequence[cst.BaseStatement],
+        *,
+        sort_constants: bool,
+    ) -> list[cst.BaseStatement]:
+        """Reorder the sortable members of a body, leaving every other statement in place.
+
+        Classes and functions (and, when ``sort_constants`` is True, constant
+        assignments) are reordered among the positions they already occupy, so
+        surrounding statements keep their absolute position and act as barriers. An
+        augmented assignment to a constant travels with that constant rather than acting
+        as a barrier, so ``__all__ += ...`` stays adjacent to ``__all__ = [...]``.
+
+        Blank-line spacing stays with each slot while comment lines travel with their
+        statement, so reordering never shifts a blank line onto a different statement.
+
+        """
+        anchors = self._anchor_trailers(body, sort_constants=sort_constants)
+        trailers_of: defaultdict[int, list[int]] = defaultdict(list)
+        for trailer_index, anchor_index in anchors.items():
+            trailers_of[anchor_index].append(trailer_index)
+        positions: list[int] = []
+        anchor_nodes: list[_Sortable] = []
+        trailers_by_anchor: dict[int, list[cst.BaseStatement]] = {}
+        for index, member in enumerate(body):
+            if index in anchors or not self._is_sortable(member, sort_constants=sort_constants):
+                continue
+            trailer_indexes = sorted(trailers_of.get(index, []))
+            positions.append(index)
+            positions.extend(trailer_indexes)
+            anchor = cast("_Sortable", member)
+            anchor_nodes.append(anchor)
+            trailers_by_anchor[id(anchor)] = [body[trailer] for trailer in trailer_indexes]
+        # Blank-line separators are positional: the n-th anchor in the body keeps the
+        # n-th separator. Trailers are excluded so they stay tight to their anchor.
+        anchor_separators = [_split_leading_lines(node)[0] for node in anchor_nodes]
+        trailer_ids = {id(trailer) for trailers in trailers_by_anchor.values() for trailer in trailers}
+        flattened: list[cst.BaseStatement] = []
+        for anchor in self._sorted_items(anchor_nodes):
+            flattened.append(anchor)
+            flattened.extend(trailers_by_anchor[id(anchor)])
+        new_body = list(body)
+        anchor_index = 0
+        for position, member in zip(sorted(positions), flattened, strict=True):
+            if id(member) in trailer_ids:
+                new_body[position] = member
+                continue
+            _, attached = _split_leading_lines(member)
+            new_body[position] = member.with_changes(leading_lines=[*anchor_separators[anchor_index], *attached])
+            anchor_index += 1
+        return new_body
 
     def _sorted_items(
         self,
-        items: list[cst.ClassDef | cst.FunctionDef],
-    ) -> list[cst.ClassDef | cst.FunctionDef]:
+        items: list[_Sortable],
+    ) -> list[_Sortable]:
         """Order siblings alphabetically while keeping each node after its dependencies.
 
         A priority topological sort is used: among the nodes whose in-group dependencies
@@ -435,7 +545,7 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         heap = [(keys[index], index) for index in range(len(items)) if indegree[index] == 0]
         heapq.heapify(heap)
         emitted = [False] * len(items)
-        order: list[cst.ClassDef | cst.FunctionDef] = []
+        order: list[_Sortable] = []
         while len(order) < len(items):
             if not heap:
                 # A dependency cycle remains; release the smallest-key pending node.
@@ -457,13 +567,14 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         original_node: cst.ClassDef,
         updated_node: cst.ClassDef,
     ) -> cst.ClassDef:
-        """Sort the methods of the class body before returning the rewritten node."""
-        items = [item for item in updated_node.body.body if isinstance(item, (cst.ClassDef, cst.FunctionDef))]
-        updated_node = cst.ensure_type(
-            updated_node.visit(SortingTransformer(self._get_replacements(items))), cst.ClassDef
+        """Sort the members of the class body before returning the rewritten node."""
+        body = updated_node.body
+        if not isinstance(body, cst.IndentedBlock):
+            return updated_node
+        sort_constants = not self._is_order_sensitive_class(original_node)
+        return updated_node.with_changes(
+            body=body.with_changes(body=self._sorted_body(body.body, sort_constants=sort_constants))
         )
-        self.in_class = False
-        return updated_node
 
     def leave_Module(
         self,
@@ -471,44 +582,146 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
         updated_node: cst.Module,
     ) -> cst.Module:
         """Sort the module-level definitions before returning the rewritten module."""
-        items = [item for item in updated_node.body if isinstance(item, (cst.ClassDef, cst.FunctionDef))]
-        updated_node = cst.ensure_type(
-            updated_node.visit(SortingTransformer(self._get_replacements(items))), cst.Module
-        )
+        updated_node = updated_node.with_changes(body=self._sorted_body(updated_node.body, sort_constants=True))
         updated_node = cst.ensure_type(updated_node.visit(KeywordArgumentSorter()), cst.Module)
         self.original_nodes = {}
         return updated_node
 
     def visit_ClassDef(self, node: cst.ClassDef) -> bool:
         """Record the class node and its dependencies before descending into it."""
-        unique_name = _gen_unique_name(node)
-        self.original_nodes[unique_name] = node
+        self.original_nodes[_gen_unique_name(node)] = node
         self._resolve_dependents(node)
-        self.in_class = True
         return True
 
     def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
         """Record the function node and skip descending into its body."""
-        unique_name = _gen_unique_name(node)
-        self.original_nodes[unique_name] = node
+        self.original_nodes[_gen_unique_name(node)] = node
         self._resolve_dependents(node)
         return False
 
+    def visit_Module(self, node: cst.Module) -> bool:
+        """Record whether annotations are lazy before collecting dependencies.
 
-class SortingTransformer(cst.CSTTransformer):
-    """Apply a precomputed replacements map to swap nodes during a traversal."""
+        Under ``from __future__ import annotations`` every annotation Name node is a
+        lazy forward reference, so it is collected here and ignored when building
+        dependency edges (otherwise a forward reference in an annotation forges a false
+        cycle).
 
-    def __init__(self, replacements: dict[str, cst.ClassDef | cst.FunctionDef]) -> None:
-        """Store the replacements keyed by unique node name."""
-        self.replacements = replacements
-        super().__init__()
+        """
+        future_annotations = bool(
+            self.findall(
+                node,
+                m.ImportFrom(
+                    module=m.Name("__future__"),
+                    names=[m.ZeroOrMore(), m.ImportAlias(name=m.Name("annotations")), m.ZeroOrMore()],
+                ),
+            )
+        )
+        if future_annotations:
+            self._lazy_annotation_names = frozenset(
+                id(name)
+                for annotation in self.findall(node, m.Annotation())
+                for name in self.findall(annotation, m.Name())
+            )
+        return True
 
-    def on_leave(
-        self,
-        original_node: cst.CSTNode,
-        updated_node: cst.CSTNode,
-    ) -> cst.CSTNode:
-        """Swap matching class or function nodes for their replacement."""
-        if isinstance(original_node, (cst.ClassDef, cst.FunctionDef)):
-            return self.replacements.get(_gen_unique_name(original_node), updated_node)
-        return updated_node
+    def visit_SimpleStatementLine(self, node: cst.SimpleStatementLine) -> bool:
+        """Record a constant assignment and its dependencies; skip everything else."""
+        if _constant_name(node) is not None:
+            self.original_nodes[_gen_unique_name(node)] = node
+            self._resolve_dependents(node)
+        return False
+
+
+def _aug_assign_name(node: cst.CSTNode) -> str | None:
+    """Return the target name if ``node`` is a single augmented assignment, else None.
+
+    An augmented assignment is a ``SimpleStatementLine`` holding exactly one
+    ``AugAssign`` with a single ``Name`` target (for example ``__all__ += extra``).
+
+    """
+    if not isinstance(node, cst.SimpleStatementLine) or len(node.body) != 1:
+        return None
+    statement = node.body[0]
+    if isinstance(statement, cst.AugAssign) and isinstance(statement.target, cst.Name):
+        return statement.target.value
+    return None
+
+
+def _constant_name(node: cst.CSTNode) -> str | None:
+    """Return the target name if ``node`` is a single simple-name assignment, else None.
+
+    A "constant" is a ``SimpleStatementLine`` holding exactly one ``Assign`` with a
+    single ``Name`` target or one ``AnnAssign`` with a ``Name`` target. Tuple targets,
+    chained assignments, augmented assignments, attribute/subscript targets, imports,
+    docstrings, and anything else are not constants and are left in place when sorting.
+
+    """
+    if not isinstance(node, cst.SimpleStatementLine) or len(node.body) != 1:
+        return None
+    statement = node.body[0]
+    if isinstance(statement, cst.Assign):
+        if len(statement.targets) == 1 and isinstance(statement.targets[0].target, cst.Name):
+            return statement.targets[0].target.value
+        return None
+    if isinstance(statement, cst.AnnAssign) and isinstance(statement.target, cst.Name):
+        return statement.target.value
+    return None
+
+
+def _gen_unique_name(node: cst.ClassDef | cst.FunctionDef | cst.SimpleStatementLine) -> str:
+    parts = [_sortable_name(node)]
+    if isinstance(node, cst.ClassDef):
+        items: tuple[cst.CSTNode, ...] = (*node.bases, *node.decorators, *node.keywords)
+    else:
+        items = (node,)
+    for item in items:
+        parts.extend(cst.ensure_type(name, cst.Name).value for name in m.findall(item, m.Name()))
+    return ".".join(parts)
+
+
+def _name_sort_key(name: str) -> tuple[bool, str]:
+    """Return an alphabetical sort key that orders ``_``-prefixed names first.
+
+    A plain string sort places ``_`` (and dunders) after capitalized names because the
+    underscore has a higher code point than ``A``-``Z``. Sorting on a leading-underscore
+    flag first keeps private and dunder names grouped ahead of the public ones.
+
+    """
+    return (not name.startswith("_"), name)
+
+
+def _rightmost_name(node: cst.BaseExpression) -> str | None:
+    """Return the rightmost simple name of a base or decorator expression, if any."""
+    if isinstance(node, cst.Call):
+        node = node.func
+    if isinstance(node, cst.Attribute):
+        return node.attr.value
+    if isinstance(node, cst.Name):
+        return node.value
+    return None
+
+
+def _sortable_name(node: cst.ClassDef | cst.FunctionDef | cst.SimpleStatementLine) -> str:
+    """Return the name used to sort and identify a class, function, or constant."""
+    if isinstance(node, (cst.ClassDef, cst.FunctionDef)):
+        return node.name.value
+    return _constant_name(node) or ""
+
+
+def _split_leading_lines(node: cst.CSTNode) -> tuple[list[cst.EmptyLine], list[cst.EmptyLine]]:
+    """Split a node's leading lines into positional spacing and attached comments.
+
+    The attached part is the trailing run of comment lines that sit directly above the
+    statement with no blank line between them; the separator is everything before it.
+    When statements are reordered the separator stays with the slot, so blank-line
+    spacing is preserved, while the attached comments travel with their statement.
+
+    """
+    if not isinstance(node, (cst.SimpleStatementLine, cst.BaseCompoundStatement)):
+        return [], []
+    leading = list(node.leading_lines)
+    split = len(leading)
+    while split > 0 and leading[split - 1].comment is not None:
+        split -= 1
+    return leading[:split], leading[split:]

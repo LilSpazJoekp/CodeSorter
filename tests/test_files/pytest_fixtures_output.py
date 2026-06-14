@@ -1,8 +1,8 @@
 import pytest
+API_KEY = "test-key-123"
 
 # Global variables
 DATABASE_URL = "sqlite:///test.db"
-API_KEY = "test-key-123"
 
 
 @pytest.fixture(autouse=True)

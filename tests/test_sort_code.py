@@ -23,6 +23,31 @@ class TestCLI:
 class TestSortCodeCommand:
     """Test cases for SortCodeCommand."""
 
+    def test_alias_function(self, test_files):
+        """Test that an assignment aliasing a method is kept after that method.
+
+        ``alias = method`` is an assignment, which by category sorts ahead of methods,
+        but it depends on the method it references, so the topological sort must keep it
+        after its target rather than letting it float to the top (which would raise a
+        ``NameError`` at class-definition time).
+
+        """
+        input_code, expected_code = test_files
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(input_code))
+
+        assert expected_code == result.code
+
+    def test_augmented_assignment(self, test_files):
+        """Test that an augmented assignment stays adjacent to the constant it augments."""
+        input_code, expected_code = test_files
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(input_code))
+
+        assert expected_code == result.code
+
     def test_basic_function(self, test_files):
         """Test that functions are sorted correctly."""
         input_code, expected_code = test_files
@@ -100,6 +125,15 @@ class MyClass:
 
         assert expected_code == result.code
 
+    def test_constant_ordering(self, test_files):
+        """Test that constants sort before classes and methods, respecting dependencies."""
+        input_code, expected_code = test_files
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(input_code))
+
+        assert expected_code == result.code
+
     def test_custom_decorators(self, test_files):
         """Test sorting with custom decorators."""
         input_code, expected_code = test_files
@@ -126,12 +160,14 @@ class MyClass:
 
         assert expected_code == result.code
 
-    def test_method_body_dependency(self, test_files):
-        """Test that a class is sorted after a later class it depends on.
+    def test_lazy_annotation_cycle(self, test_files):
+        """Test that a forward reference in a lazy annotation does not force a cycle.
 
-        Regression test: a dependent must follow every class it depends on even when the
-        dependency is discovered through a method (here a return annotation), not a base
-        class. The previous heuristic could place the dependent before it.
+        Under ``from __future__ import annotations`` an annotation is a lazy string, so
+        ``class Apple`` annotated with ``Instr`` must not be treated as depending on the
+        ``Instr = Apple | Zebra`` alias. The value-level union genuinely depends on
+        ``Apple``/``Zebra`` and must follow them; the lazy-annotation edge is dropped so
+        no false cycle hoists ``Instr`` above its members (which would raise NameError).
 
         """
         input_code, expected_code = test_files
@@ -164,6 +200,15 @@ from pathlib import Path
         assert "import os" in result.code
         assert "import sys" in result.code
         assert "from pathlib import Path" in result.code
+
+    def test_order_sensitive(self, test_files):
+        """Test that enum, dataclass, and named-tuple member order is preserved."""
+        input_code, expected_code = test_files
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(input_code))
+
+        assert expected_code == result.code
 
     def test_property(self, test_files):
         """Test that properties are sorted correctly."""
@@ -200,3 +245,73 @@ from pathlib import Path
         result = command.transform_module(cst.parse_module(input_code))
 
         assert expected_code == result.code
+
+    def test_whitespace_not_introduced(self):
+        """Test that reordering keeps blank lines with their slot, not the moved node.
+
+        The blank line after the docstring must stay at the top of the block rather than
+        travelling down with ``STR_FIELD``, and the comment must stay attached to the
+        attribute it documents.
+
+        """
+        code = '''class Subreddit:
+    """A subreddit."""
+
+    STR_FIELD = "display_name"
+    MAX_CAPTION_LENGTH = 180
+    MESSAGE_PREFIX = "#"
+
+    # Bound at import time to avoid circular imports.
+    _submission_class: int
+
+    def method(self):
+        return None
+'''
+        expected = '''class Subreddit:
+    """A subreddit."""
+
+    MAX_CAPTION_LENGTH = 180
+    MESSAGE_PREFIX = "#"
+    STR_FIELD = "display_name"
+
+    # Bound at import time to avoid circular imports.
+    _submission_class: int
+
+    def method(self):
+        return None
+'''
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(code))
+
+        assert expected == result.code
+
+    def test_whitespace_trailer_stays_tight(self):
+        """Test that an anchored augmented assignment stays tight to its constant.
+
+        The ``__all__ += ...`` trailer must stay directly under ``__all__ = [...]`` with
+        no blank line between them, and the blank-line separator must land before the
+        ``__version__`` assignment that sorts after it.
+
+        """
+        code = """__version__ = "1.0"
+
+__all__ = [
+    "Beta",
+    "Alpha",
+]
+__all__ += extra.__all__
+"""
+        expected = """__all__ = [
+    "Beta",
+    "Alpha",
+]
+__all__ += extra.__all__
+
+__version__ = "1.0"
+"""
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(code))
+
+        assert expected == result.code
