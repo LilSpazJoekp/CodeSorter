@@ -2,6 +2,12 @@
 
 .. toctree::
     :hidden:
+    :caption: Usage
+
+    usage/barriers
+
+.. toctree::
+    :hidden:
     :caption: Code Overview
 
     code_overview/sort_code

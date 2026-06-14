@@ -8,6 +8,12 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+**Added**
+
+- Documentation page describing how barriers limit sorting to segments between
+  side-effecting statements, and how to relocate a statement that should not be a
+  barrier.
+
 ********************
  0.2.5 (2026/06/14)
 ********************
