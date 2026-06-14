@@ -8,6 +8,10 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+********************
+ 0.2.4 (2026/06/14)
+********************
+
 **Fixed**
 
 - Never reorder a definition across a side-effecting statement. A bare statement such as
