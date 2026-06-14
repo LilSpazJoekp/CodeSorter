@@ -8,6 +8,10 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+********************
+ 0.2.1 (2026/06/14)
+********************
+
 **Fixed**
 
 - Treat a name used inside a module- or class-level comprehension as a real dependency.
