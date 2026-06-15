@@ -8,6 +8,17 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+**Fixed**
+
+- Do not treat a class's own attribute as a dependency on a same-named outer definition.
+  An enum member or class variable named like the module constant that aliases it (for
+  example ``CACHE_MISS = _Sentinel.CACHE_MISS`` beside ``class _Sentinel(Enum):
+  CACHE_MISS = auto()``) previously forged a false ``class`` -> ``constant`` edge that
+  closed a cycle with the real ``constant`` -> ``class`` edge, hoisting the constant
+  above the class it references and raising ``NameError`` at import. A name bound in a
+  class's own body is now recognized as belonging to that class's namespace and imposes
+  no ordering on outer definitions.
+
 ********************
  0.2.6 (2026/06/14)
 ********************

@@ -1,5 +1,9 @@
 """Tests for the SortCodeCommand codemod."""
 
+import io
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
 import libcst as cst
 import pytest
 from libcst.codemod import CodemodContext
@@ -182,6 +186,52 @@ class MyClass:
         command = SortCodeCommand(context)
         result = command.transform_module(cst.parse_module(code))
         assert result.code.strip() == ""
+
+    def test_enum_member_alias(self, test_files):
+        """Test that a class attribute sharing a name with an outer constant is not a dep.
+
+        An enum member (or class variable) named like the module constant that aliases
+        it (``CACHE_MISS = _Sentinel.CACHE_MISS``) is bound in the class's own
+        namespace, so it must not forge a dependency from the class back onto the
+        constant. Without that guard the false ``_Sentinel`` -> ``CACHE_MISS`` edge
+        closes a cycle with the real ``CACHE_MISS`` -> ``_Sentinel`` edge, and
+        cycle-breaking hoists the constant above the class it references (raising
+        NameError at import).
+
+        """
+        input_code, expected_code = test_files
+        context = CodemodContext()
+        command = SortCodeCommand(context)
+        result = command.transform_module(cst.parse_module(input_code))
+
+        assert expected_code == result.code
+
+    def test_fixture_files_execute(self):
+        """Every input/output fixture must import cleanly with no side effects.
+
+        Executing each file in a fresh namespace is a stronger guard than parsing: it
+        catches a fixture that parses but does not run (an invalid input, or a codemod
+        output that raises ``NameError`` because a definition was hoisted above one it
+        depends on). Each file is also required to be self-contained and side-effect
+        free, so anything written to stdout/stderr fails the test.
+
+        """
+        test_files_dir = Path(__file__).parent / "test_files"
+        fixtures = sorted(test_files_dir.glob("*.py"))
+        assert fixtures, "no fixture files found"
+        failures = []
+        for path in fixtures:
+            captured = io.StringIO()
+            try:
+                code = compile(path.read_text(encoding="utf-8"), str(path), "exec")
+                with redirect_stdout(captured), redirect_stderr(captured):
+                    exec(code, {"__name__": "__fixture__"})  # noqa: S102
+            except Exception as error:  # noqa: BLE001
+                failures.append(f"{path.name}: {type(error).__name__}: {error}")
+                continue
+            if captured.getvalue():
+                failures.append(f"{path.name}: wrote to stdout/stderr {captured.getvalue()!r}")
+        assert not failures, "fixtures that do not execute cleanly:\n" + "\n".join(failures)
 
     def test_keyword_arguments(self, test_files):
         """Test that keyword arguments, keyword-only params, and dict keys are sorted."""

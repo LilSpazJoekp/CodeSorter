@@ -1,11 +1,8 @@
 """Definitions never cross a side-effecting statement that may depend on them."""
 
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parent
+MIDDLE = 5
 ZEBRA = 1
-sys.path.insert(0, str(REPO_ROOT))
+repr(MIDDLE)  # a barrier: a bare statement splits the surrounding definitions
 
 APPLE = 2
 BANANA = 3

@@ -1,3 +1,5 @@
+"""A comprehensive mix of constants, decorators, inheritance, and pytest fixtures."""
+
 import os
 from abc import ABC, abstractmethod
 from functools import wraps
@@ -10,7 +12,34 @@ API_KEY = "test-key-123"
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 
 
-# Functions with decorators
+# Custom decorators (defined before the functions that use them)
+def cache_result(func):
+    """Cache the result of a function."""
+    cache = {}
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = func(*args, **kwargs)
+        return cache[key]
+
+    return wrapper
+
+
+def validate_input(func):
+    """Validate input parameters."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        for arg in args:
+            if arg is None:
+                raise ValueError("Input cannot be None")
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 @cache_result
 def expensive_calculation(n):
     """Perform an expensive calculation."""
@@ -21,6 +50,39 @@ def expensive_calculation(n):
 def process_data(data):
     """Process input data."""
     return [item.upper() for item in data]
+
+
+# Base classes with inheritance (each base defined before its subclass)
+class Animal(ABC):
+    """Base class for all animals."""
+
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+    @abstractmethod
+    def make_sound(self):
+        """Make a sound."""
+
+    def get_info(self):
+        """Get animal information."""
+        return f"{self.name} is {self.age} years old"
+
+
+class Mammal(Animal):
+    """Base class for mammals."""
+
+    def __init__(self, name, age, fur_color):
+        super().__init__(name, age)
+        self.fur_color = fur_color
+
+    def make_sound(self):
+        """Make a mammal sound."""
+        return "Generic mammal sound"
+
+    def get_fur_info(self):
+        """Get fur information."""
+        return f"Fur color: {self.fur_color}"
 
 
 class Dog(Mammal):
@@ -43,45 +105,11 @@ class Dog(Mammal):
         return f"{self.name} is fetching"
 
 
-class Mammal(Animal):
-    """Base class for mammals."""
-
-    def __init__(self, name, age, fur_color):
-        super().__init__(name, age)
-        self.fur_color = fur_color
-
-    def make_sound(self):
-        """Make a mammal sound."""
-        return "Generic mammal sound"
-
-    def get_fur_info(self):
-        """Get fur information."""
-        return f"Fur color: {self.fur_color}"
-
-
-# Base classes with inheritance
-class Animal(ABC):
-    """Base class for all animals."""
-
-    def __init__(self, name, age):
-        self.name = name
-        self.age = age
-
-    @abstractmethod
-    def make_sound(self):
-        """Make a sound."""
-
-    def get_info(self):
-        """Get animal information."""
-        return f"{self.name} is {self.age} years old"
-
-
-# Classes with global dependencies
 class DatabaseManager:
     """Manages database connections using global config."""
 
     def __init__(self):
-        self.host = "localhost"  # Would normally use DATABASE_URL
+        self.host = "localhost"
         self.port = 5432
         self.database = "test_db"
 
@@ -109,40 +137,11 @@ class APIClient:
         return DEBUG_MODE
 
 
-def validate_input(func):
-    """Validate input parameters."""
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        for arg in args:
-            if arg is None:
-                raise ValueError("Input cannot be None")
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 def regular_function():
     """A regular function without decorators."""
     return "regular"
 
 
-# Custom decorators
-def cache_result(func):
-    """Cache the result of a function."""
-    cache = {}
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        key = str(args) + str(kwargs)
-        if key not in cache:
-            cache[key] = func(*args, **kwargs)
-        return cache[key]
-
-    return wrapper
-
-
-# Test functions
 def test_something(database_connection, sample_data):
     """Test function using fixtures."""
     assert database_connection["connected"]
@@ -171,7 +170,6 @@ def sample_data():
     return ["item1", "item2", "item3"]
 
 
-# Pytest fixtures
 @pytest.fixture(scope="session")
 def database_connection():
     """Provide a database connection for testing."""

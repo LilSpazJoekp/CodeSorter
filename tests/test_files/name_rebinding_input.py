@@ -1,6 +1,11 @@
 """An assignment that rebinds a method name stays after the method it wraps."""
 
 
+def cachedproperty(method, *, doc=None):
+    """Minimal stand-in so the rebinding has something to call."""
+    return property(method)
+
+
 class Klass:
     def ten(self):
         return 10
