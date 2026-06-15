@@ -1,12 +1,13 @@
 """Augmented assignments stay anchored to the constant they augment."""
 
-from mod import extra, more
+import enum
+import json
 
 ZEBRA = 1
 __version__ = "1.0"
 __all__ = ["Widget"]
-__all__ += extra.__all__
-__all__ += more.__all__
+__all__ += json.__all__
+__all__ += enum.__all__
 APPLE = 2
 
 

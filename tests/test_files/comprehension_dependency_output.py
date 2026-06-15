@@ -1,7 +1,8 @@
 """A module-level comprehension references a function eagerly, so it depends on it."""
 
+
 def build(name):
-    """Used eagerly by the module-level comprehension above."""
+    """Used eagerly by the module-level comprehension below."""
     return f"value-{name}"
 
 

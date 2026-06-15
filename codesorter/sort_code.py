@@ -336,7 +336,24 @@ class SortCodeCommand(VisitorBasedCodemodCommand, m.MatcherDecoratableTransforme
                     # an annotation forging a false cycle with a real value-level edge.
                     if id(found["name"]) in self._lazy_annotation_names:
                         continue
-                    found_name = cst.ensure_type(found["name"], cst.Name).value
+                    name_node = cst.ensure_type(found["name"], cst.Name)
+                    found_name = name_node.value
+                    # A name bound at this class's own body level (an enum member or
+                    # class variable) belongs to the class's namespace, so it must not
+                    # forge a dependency on a same-named outer definition. Otherwise an
+                    # enum member named like the module constant that aliases it (for
+                    # example ``CACHE_MISS = _Sentinel.CACHE_MISS``) creates a false cycle
+                    # that hoists the constant above the class it depends on. The scope
+                    # must be ``node``'s own class scope; a name bound in the *enclosing*
+                    # class (a sibling method an alias assignment references) is a real
+                    # dependency and is kept.
+                    name_scope = self.get_metadata(md.ScopeProvider, name_node, None)
+                    if (
+                        isinstance(name_scope, md.ClassScope)
+                        and name_scope.node == node
+                        and name_scope.assignments[found_name]
+                    ):
+                        continue
                     is_import = isinstance(
                         next(iter(meta.assignments[found_name])),
                         md.ImportAssignment,

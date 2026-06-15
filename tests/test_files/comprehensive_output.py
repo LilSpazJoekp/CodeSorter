@@ -1,10 +1,12 @@
+"""A comprehensive mix of constants, decorators, inheritance, and pytest fixtures."""
+
 import os
 from abc import ABC, abstractmethod
 from functools import wraps
 
 import pytest
-API_KEY = "test-key-123"
 
+API_KEY = "test-key-123"
 # Global variables
 DATABASE_URL = "sqlite:///test.db"
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
@@ -25,7 +27,7 @@ class APIClient:
         return f"GET {self.base_url}{endpoint}"
 
 
-# Base classes with inheritance
+# Base classes with inheritance (each base defined before its subclass)
 class Animal(ABC):
     """Base class for all animals."""
 
@@ -42,12 +44,11 @@ class Animal(ABC):
         return f"{self.name} is {self.age} years old"
 
 
-# Classes with global dependencies
 class DatabaseManager:
     """Manages database connections using global config."""
 
     def __init__(self):
-        self.host = "localhost"  # Would normally use DATABASE_URL
+        self.host = "localhost"
         self.port = 5432
         self.database = "test_db"
 
@@ -105,7 +106,6 @@ def setup_test_environment():
     API_KEY = "test-key-123"
 
 
-# Pytest fixtures
 @pytest.fixture(scope="session")
 def database_connection():
     """Provide a database connection for testing."""
@@ -118,7 +118,7 @@ def sample_data():
     return ["item1", "item2", "item3"]
 
 
-# Custom decorators
+# Custom decorators (defined before the functions that use them)
 def cache_result(func):
     """Cache the result of a function."""
     cache = {}
@@ -133,7 +133,6 @@ def cache_result(func):
     return wrapper
 
 
-# Functions with decorators
 @cache_result
 def expensive_calculation(n):
     """Perform an expensive calculation."""
@@ -161,7 +160,6 @@ def test_global_dependencies():
     assert api_client.is_debug_mode() == DEBUG_MODE
 
 
-# Test functions
 def test_something(database_connection, sample_data):
     """Test function using fixtures."""
     assert database_connection["connected"]
