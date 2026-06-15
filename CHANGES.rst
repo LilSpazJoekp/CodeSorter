@@ -8,6 +8,10 @@ codesorter follows `semantic versioning <https://semver.org/>`_.
  Unreleased
 ************
 
+********************
+ 0.2.8 (2026/06/15)
+********************
+
 **Fixed**
 
 - Keep a module-level assignment that calls a local definition after the names that call
